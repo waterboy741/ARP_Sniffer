@@ -4,6 +4,8 @@
 
 The supported development environment is macOS arm64 with installed Qt/libpcap dependencies. Linux, Windows, Intel macOS, standalone deployment, signing, notarization, and launch on a clean Mac without dependencies have not been validated. The GitHub Actions workflow in `.github/workflows/macos.yml` adds ordinary unprivileged debug/release/ASan+UBSan tests on `macos-15` arm64. Its hosted execution remains unverified until a workflow run completes.
 
+The first hosted configure attempt exposed Homebrew's keg-only libpcap discovery: its `.pc` file was outside pkg-config's default search path. CI now persists the formula-derived `lib/pkgconfig` directory in `PKG_CONFIG_PATH` before configuration and verifies discovery in a separate step. A local fresh configure with default pkg-config search disabled reproduced the missing-package failure and succeeded with this explicit directory. A successful hosted rerun remains to be recorded.
+
 The fresh Release bundle audit found a valid `Contents/Info.plist`, bundle identifier `edu.cpre5300.arp-sniffer`, name `ARP Sniffer`, version `0.1.0`, and executable `Contents/MacOS/arp_sniffer`. `otool -L` reports installed Homebrew QtWidgets, QtGui, QtConcurrent, QtCore and libpcap paths plus macOS system frameworks/libraries. The Cocoa platform plugin is installed with Qt and is not copied into the bundle. This is a development application bundle, not a portable release artifact. Follow [../MACOS_PORTABILITY_PLAN.md](../MACOS_PORTABILITY_PLAN.md) for future deployment work.
 
 Reproduce the audit after building Release:
