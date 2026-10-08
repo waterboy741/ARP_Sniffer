@@ -2,9 +2,9 @@
 
 ## Status and Goal
 
-Implementation authorized one milestone at a time. Use GPT-6.1 Sol for implementation, GPT-6 Luna for testing, and a separate GPT-6 Luna session for review. Give concise instructions and limit requested file access to each task’s needs. Implementation, testing, and review work concurrently and collaborate as needed. Relay findings to both implementation and testing agents; require all three signoffs before completing the milestone.
+Implementation authorized one milestone at a time. Use three seperate subagents with their own sessions for implementation, testing, and review they should all use GPT-6.1 Sol with a Low thinking level. Give concise instructions and limit requested file access to each task’s needs. Implementation, testing, and review work concurrently and collaborate as needed. Relay findings to both implementation and testing agents; require all three signoffs before completing the milestone.
 
-**Step 5 complete.** Steps 1–5 have unanimous implementation, testing, and review signoff. This run stops here; step 6 has not started.
+**Step 6 complete.** Steps 1–6 have unanimous implementation, testing, and review signoff. Physical interface disconnection remains untested under the user's explicit exception so the active network connection was preserved.
 
 ### Milestone Signoff
 
@@ -15,7 +15,7 @@ Implementation authorized one milestone at a time. Use GPT-6.1 Sol for implement
 | 3. Capture service | Complete | Complete | Complete | Complete |
 | 4. Live GUI | Complete | Complete | Complete | Complete |
 | 5. Recording and replay | Complete | Complete | Complete | Complete |
-| 6. Release validation | Pending | Pending | Pending | Not started |
+| 6. Release validation | Complete | Complete | Complete | Complete with documented disconnect exception |
 
 Build a C++ GUI application that records and displays ARP requests and responses observed on a selected local network interface. Keep the interface responsive during capture and preserve a session on disk for later inspection.
 
@@ -94,12 +94,14 @@ ctest --preset debug --output-on-failure
 
 ## 6. Integrate and Validate the First Release
 
-- [ ] Run automated parser, capture lifecycle, model, and recording tests with supported sanitizers. Add CI for the supported platform and ordinary unprivileged tests.
-- [ ] Perform an authorized live-network smoke test against a known ARP exchange and compare fields with an independent capture tool.
-- [ ] Exercise no traffic, denied access, disconnected interface, extended capture, and closing during capture/recording.
-- [ ] Document setup, launch, privileges, visibility limitations, retention behavior, and troubleshooting. Verify the macOS application bundle and dependency deployment.
+- [x] Run automated parser, capture lifecycle, model, and recording tests with supported sanitizers. Add CI for the supported platform and ordinary unprivileged tests.
+- [x] Perform an authorized live-network smoke test against a known ARP exchange and compare fields with an independent capture tool.
+- [x] Exercise idle/no-traffic and close-during-recording paths with deterministic tests; exercise denied access, extended recording, and stop/replay on the real interface. Physical interface disconnection was explicitly excepted by the user and remains untested.
+- [x] Document setup, launch, privileges, visibility limitations, retention behavior, and troubleshooting. Verify the macOS development application bundle and installed dependency paths; standalone deployment is future work in [MACOS_PORTABILITY_PLAN.md](MACOS_PORTABILITY_PLAN.md).
 
 **Completion check:** a new contributor can follow the documented setup and record, inspect, export, and reopen an ARP session. Report any unresolved defects and untested platform behavior.
+
+Future standalone macOS packaging and distribution work is detailed in [MACOS_PORTABILITY_PLAN.md](MACOS_PORTABILITY_PLAN.md). This follow-up plan does not mean deployment work has started or passed validation.
 
 ## Planned Module Layout
 
@@ -144,3 +146,5 @@ Include this instruction:
 - **Step 4:** Sol implementation, Luna testing, and the new Luna reviewer worked concurrently and all voted complete. Debug and ASan/UBSan passed five CTest suites; reviewer independently passed 5/5. Tests include synthetic bytes through capture/parser/GUI, async close during startup/capture, errors, filters with invariant totals, sorting, VLAN details, and retention. A shown-window 100,000-record stress run on macOS 27.0.1 arm64 took approximately 370–373 ms, retained 10,000 and evicted 90,000 rows; measured maximum timer gap was 13 ms in testing and 18 ms in independent review. Populated-window visual inspection confirmed readable timestamps and explicit not-recording wording. Recording is disabled until step 5; no real live-network capture was exercised in this milestone. No step 5 work started.
 
 - **Step 5:** Sol implementation, Luna testing, and Luna review all voted complete. Debug and ASan/UBSan passed six CTest suites; independent reviewer debug passed 6/6. Verified production PCAP exact bytes/lengths/nanosecond timestamps/link type, bounded writer overflow and open/write/flush errors, error visibility during stop, overwrite refusal/confirmation, CSV scopes/quoting, malformed captures, and replay backpressure. A synthetic 10,050-packet record→GUI retention/filter→CSV→replay integration test passed; recording precedes GUI queue drops and row eviction. Fixed a startup-error cancellation race and corrected the overwrite-dialog test to click actual buttons. Populated GUI inspected. No real live-network capture performed; step 6 has not started.
+
+- **Step 6:** Three GPT-6.1 Sol subagents at low thinking gave unanimous COMPLETE votes under the user's explicit exception for physical interface disconnection. The documented debug, release, and sanitizer configure/build/CTest commands each passed 6/6 suites after the final CSV fix; independent isolated validation also passed. A separate Release build without tests completed cleanly. New tests verify 128 exact frames survive GUI close during recording and explicitly exercise real ordinary-user BPF denial. The initial sandboxed `en0` attempt received `/dev/bpf0: Operation not permitted`; the GUI showed the error, restored controls, retained zero rows, and closed cleanly. Outside the tool sandbox, an authorized `en0` recording ran 312.8 seconds, captured 33 observations (17 requests, 16 replies), and reported zero parser/kernel/application drops with interface drops unknown. An overlapping `tcpdump` capture had 26 packets, all matched byte-for-byte in the app PCAP with equal lengths and timestamp differences of at most 3 microseconds. Gateway request/reply addresses and operations agreed. GUI replay restored 33 rows; after fixing a disabled native CSV Save button by using Qt's widget picker, interactive export produced 33 `offline` rows. The development bundle plist/executable, installed Homebrew Qt/libpcap dependencies, and Cocoa plugin were audited. Added macOS arm64 CI and [release validation procedures](docs/RELEASE_VALIDATION.md); hosted CI has not run. Physical interface disconnection remains untested because it would interrupt this active chat, as expressly accepted by the user. Standalone deployment remains future work under [MACOS_PORTABILITY_PLAN.md](MACOS_PORTABILITY_PLAN.md).

@@ -1,6 +1,6 @@
 # ARP Sniffer
 
-A C++20/Qt 6 Widgets application for macOS. The current milestones provide a working application window, lifecycle tests, and a pure Ethernet/IPv4 ARP parser. Live capture controls, sortable packet inspection, and display filters are implemented. PCAP recording, CSV export, and offline replay are implemented; release validation follows [PLAN.md](PLAN.md).
+A C++20/Qt 6 Widgets application for macOS with live ARP capture, packet inspection and filtering, PCAP recording/replay, and CSV export. Release validation follows [PLAN.md](PLAN.md); manual checks and recorded limitations are described in [docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md).
 
 ## Development environment
 
@@ -41,7 +41,7 @@ Compiler warnings (`-Wall -Wextra -Wpedantic -Wconversion -Wshadow`) provide the
 
 The GUI supports live interface selection, recording, and offline PCAP replay. Live capture requires explicit interface selection and appropriate capture-device permissions on an authorized network. Offline replay requires no capture privileges. Capture files are ignored; only curated synthetic fixtures in `tests/fixtures/` may be committed. See [PLAN.md](PLAN.md) for scope, network visibility limits, and acceptance criteria.
 
-The current `.app` is a development bundle using installed Qt libraries. Standalone dependency deployment is scheduled for milestone 6.
+The current `.app` is a development bundle using installed Qt and libpcap libraries and Qt's installed Cocoa platform plugin. Keep these dependencies installed when launching it, including through Finder (`open build/release/arp_sniffer.app`). Copying this bundle to a Mac without those dependencies is unsupported. The bundle and its runtime paths are audited in [docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md). Standalone dependency deployment, signing, notarization, and clean-Mac distribution are future work in [MACOS_PORTABILITY_PLAN.md](MACOS_PORTABILITY_PLAN.md).
 
 ## Packet parser
 
@@ -57,7 +57,7 @@ Supported frames use Ethernet link type 1 and IPv4 ARP with request/reply operat
 
 For authorized macOS live capture, install Wireshark's official **Install ChmodBPF.pkg** from its disk image (or About Wireshark → Folders → macOS Extras) to configure BPF device access, following [Wireshark's macOS installation guide](https://www.wireshark.org/docs/wsug_html_chunked/ChBuildInstallOSXInstall.html). Reopen your login session if group membership changes, then run the app as your ordinary user. Permission failures retain libpcap's error message. This project does not install privilege helpers or modify machine permissions. Select only an authorized Ethernet interface; loopback/monitor link types are rejected. Capture visibility is limited to traffic delivered to that interface; promiscuous mode does not reveal all traffic on a switched network.
 
-Routine capture tests create synthetic PCAPs in temporary directories, requiring no live interface or privileges. Authorized live traffic validation remains milestone 6; no live network capture has been performed for milestone 3.
+Routine capture tests create synthetic PCAPs in temporary directories, requiring no live interface or privileges. The macOS CI workflow runs debug, release, and ASan/UBSan presets as an ordinary user, without opening live interfaces. A hosted CI run is only verified after its workflow completes; local validation does not establish a hosted result. Live validation requires the separate procedure in [docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md).
 
 ## Live capture window
 
@@ -79,4 +79,17 @@ Click **Open PCAP** while stopped to replay through the same capture/parse/table
 
 Choose **All retained rows** (capture order) or **Displayed rows** (current filter/sort order), then **Export CSV**. Export snapshots that scope and writes on a worker; closing waits for it. Export covers current retained decoded rows, not evicted history or all raw packets. Headers identify Unix-epoch nanoseconds, interface, ARP/Ethernet addresses, operation, VLAN TPID/TCI pairs, and frame lengths. Data fields are quoted with doubled quotes and CRLF row endings, including embedded commas/newlines. Existing CSV files require explicit overwrite confirmation; write/flush errors report incomplete output.
 
-`SessionWriter`/`IRecordingSink` provide deterministic overflow/write/flush-failure tests. `CaptureService::setRecording` configures a session while stopped; its worker opens, queues, and finishes the writer. `setReplayMode(true)` enables offline backpressure. `MainWindow::exportRows` is a synchronous test/programmatic seam; the interactive Export button uses a worker. No authorized live-network smoke test has been performed yet (milestone 6).
+`SessionWriter`/`IRecordingSink` provide deterministic overflow/write/flush-failure tests. `CaptureService::setRecording` configures a session while stopped; its worker opens, queues, and finishes the writer. `setReplayMode(true)` enables offline backpressure. `MainWindow::exportRows` is a synchronous test/programmatic seam; the interactive Export button uses a worker.
+
+## Troubleshooting
+
+| Symptom | Action |
+| --- | --- |
+| CMake cannot find Qt or libpcap | Check `brew --prefix qt`, `pkg-config --modversion libpcap`, and your ignored user preset paths. Reconfigure after dependency changes. |
+| Launch reports a missing dylib or Cocoa plugin | Keep the installed Qt/libpcap dependencies available and rebuild after upgrading them. This development bundle is not standalone. |
+| Permission denied opening a capture device | Apply the official ChmodBPF setup above and follow its login instructions. Start the GUI as your ordinary user. Offline replay/export still work. |
+| No rows appear | Check the selected interface, clear display filters, and generate an authorized ARP exchange. ARP is IPv4; loopback and unsupported link types are rejected. Switched networks can hide unicast replies. |
+| Interface disappears or capture stops | Read the status error, reconnect, select an available interface, and start a new session. Preserve an incomplete recording for inspection. |
+| Recording or CSV write fails | Choose a writable user directory with sufficient free space. An overflow/write/flush failure can leave incomplete output; the status reports it. |
+| Old packets are absent from CSV | CSV includes retained/displayed decoded rows only. GUI replay also retains only the newest 10,000 rows. Use an external PCAP tool to inspect packets evicted from a full recording. |
+| Counts differ from visible rows | Filters and row eviction affect the view; totals cover the session. Check parser errors and capture/application drop counters; unknown drop counts do not mean zero. |

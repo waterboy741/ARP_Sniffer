@@ -1,0 +1,47 @@
+name: macOS validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [debug, release, sanitizer]
+    env:
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      ASAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install development dependencies
+        run: brew install cmake ninja qt libpcap pkgconf
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel 3
+      - name: Run ordinary unprivileged tests
+        run: |
+          test "$(id -u)" -ne 0
+          ctest --preset ${{ matrix.preset }} --output-on-failure
+      - name: Inspect development application bundle
+        run: |
+          bundle="build/${{ matrix.preset }}/arp_sniffer.app"
+          plutil -lint "$bundle/Contents/Info.plist"
+          test -x "$bundle/Contents/MacOS/arp_sniffer"
+          otool -L "$bundle/Contents/MacOS/arp_sniffer"
+          plugins="$("$(brew --prefix qt)/bin/qtpaths" --query QT_INSTALL_PLUGINS)"
+          test -f "$plugins/platforms/libqcocoa.dylib"
+      - name: Preserve test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.preset }}-test-logs
+          path: build/${{ matrix.preset }}/Testing/Temporary/

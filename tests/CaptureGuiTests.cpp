@@ -2,8 +2,10 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
 #include <QLineEdit>
@@ -164,6 +166,9 @@ class CaptureGuiTests : public QObject
     void recordingOverwriteRequiresConfirmation();
     void fixturePacketsReachRowsAndCounters();
     void recordingAndReplayPreserveRowsBeyondDisplayLimit();
+    void closeDuringRecordingFlushesCompleteSession();
+    void optionalDeniedLiveAccess();
+    void interactiveCsvExportAcceptsWritableFilename();
     void countersIgnoreDisplayFiltersAndDetailsFollowSelection();
     void retainsNewestTenThousandAndStaysResponsive();
 };
@@ -419,6 +424,188 @@ void CaptureGuiTests::recordingAndReplayPreserveRowsBeyondDisplayLimit()
     QCOMPARE(window.replyCount(), std::uint64_t{5025});
     QCOMPARE(window.packetModel()->rowCount(), 10000);
     QCOMPARE(window.packetModel()->discardedCount(), std::uint64_t{50});
+}
+
+void CaptureGuiTests::interactiveCsvExportAcceptsWritableFilename()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto path = directory.filePath("interactive.csv");
+    auto state = std::make_shared<BackendState>();
+    auto window = makeWindow(state);
+    window.appendRecords({makeRecord(1, arp::ArpOperation::Request, {192, 0, 2, 10},
+                                     {192, 0, 2, 20}, {2, 0, 0, 0, 0, 10})});
+    auto* exportButton = window.findChild<QPushButton*>("exportCsvButton");
+    auto* status = window.findChild<QLabel*>("statusLabel");
+    QVERIFY(exportButton && status);
+    bool foundDialog = false;
+    bool saveEnabled = false;
+    int attempts = 0;
+    QTimer automate;
+    automate.setInterval(20);
+    connect(&automate, &QTimer::timeout, &window, [&] {
+        auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+        if (!dialog)
+            return;
+        foundDialog = true;
+        if (attempts++ == 0) {
+            dialog->setDirectory(directory.path());
+            auto* filename = dialog->findChild<QLineEdit*>("fileNameEdit");
+            if (filename) {
+                filename->selectAll();
+                QTest::keyClicks(filename, "interactive");
+            }
+            return;
+        }
+        auto* buttons = dialog->findChild<QDialogButtonBox*>();
+        auto* save = buttons ? buttons->button(QDialogButtonBox::Save) : nullptr;
+        saveEnabled = save && save->isEnabled();
+        if (!saveEnabled && attempts < 50)
+            return;
+        automate.stop();
+        if (saveEnabled)
+            save->click();
+        else
+            dialog->reject();
+    });
+    automate.start();
+    exportButton->click();
+    automate.stop();
+    QVERIFY(foundDialog);
+    QVERIFY(saveEnabled);
+    QTRY_COMPARE_WITH_TIMEOUT(status->text(), QStringLiteral("CSV export complete"), 10000);
+    QVERIFY(exportButton->isEnabled());
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto csv = file.readAll();
+    QCOMPARE(csv.count('\n'), qsizetype{2});
+    QVERIFY(csv.contains("192.0.2.10"));
+    file.close();
+
+    // Exercise the real button's cancel and separate overwrite decision paths.
+    for (const auto decision : {QMessageBox::Cancel, QMessageBox::No, QMessageBox::Yes}) {
+        if (decision != QMessageBox::Cancel) {
+            QFile existing(path);
+            QVERIFY(existing.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            QCOMPARE(existing.write("sentinel"), qint64{8});
+        }
+        bool picked = false;
+        bool answered = false;
+        QTimer interact;
+        interact.setInterval(20);
+        connect(&interact, &QTimer::timeout, &window, [&] {
+            if (auto* picker = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+                if (decision == QMessageBox::Cancel) {
+                    picked = true;
+                    picker->reject();
+                    return;
+                }
+                if (!picked) {
+                    picker->setDirectory(directory.path());
+                    auto* filename = picker->findChild<QLineEdit*>("fileNameEdit");
+                    if (filename) {
+                        filename->selectAll();
+                        QTest::keyClicks(filename, "interactive.csv");
+                    }
+                    picked = true;
+                    return;
+                }
+                auto* buttons = picker->findChild<QDialogButtonBox*>();
+                auto* save = buttons ? buttons->button(QDialogButtonBox::Save) : nullptr;
+                if (save && save->isEnabled())
+                    save->click();
+            } else if (auto* confirmation =
+                           qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+                answered = true;
+                confirmation->button(decision)->click();
+            }
+        });
+        interact.start();
+        exportButton->click();
+        interact.stop();
+        QVERIFY(picked);
+        QCOMPARE(answered, decision != QMessageBox::Cancel);
+        if (decision == QMessageBox::Yes)
+            QTRY_VERIFY(exportButton->isEnabled());
+        QFile result(path);
+        QVERIFY(result.open(QIODevice::ReadOnly));
+        const auto output = result.readAll();
+        if (decision == QMessageBox::No)
+            QCOMPARE(output, QByteArray("sentinel"));
+        else
+            QCOMPARE(output, csv);
+    }
+}
+
+void CaptureGuiTests::optionalDeniedLiveAccess()
+{
+    const auto interface = qEnvironmentVariable("ARP_TEST_DENIED_INTERFACE");
+    if (interface.isEmpty())
+        QSKIP("Set ARP_TEST_DENIED_INTERFACE to explicitly exercise a denied live interface");
+    MainWindow window(arp::makePcapBackend(), {{interface.toStdString(), "Denied access", false}});
+    auto* interfaces = window.findChild<QComboBox*>("interfaceCombo");
+    auto* start = window.findChild<QPushButton*>("startButton");
+    auto* stop = window.findChild<QPushButton*>("stopButton");
+    auto* status = window.findChild<QLabel*>("statusLabel");
+    QVERIFY(interfaces && start && stop && status);
+    interfaces->setCurrentIndex(1);
+    start->click();
+    QTRY_COMPARE_WITH_TIMEOUT(window.errorCount(), std::uint64_t{1}, 10000);
+    const auto error = status->text();
+    QVERIFY2(error.contains("Permission denied", Qt::CaseInsensitive) ||
+                 error.contains("Operation not permitted", Qt::CaseInsensitive),
+             qPrintable(error));
+    QTRY_VERIFY(start->isEnabled());
+    QVERIFY(!stop->isEnabled());
+    QCOMPARE(window.packetModel()->rowCount(), 0);
+    qInfo().noquote() << "Observed denied-access GUI status:" << error;
+    window.close();
+}
+
+void CaptureGuiTests::closeDuringRecordingFlushesCompleteSession()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto path = directory.filePath("closed-session.pcap");
+    auto state = std::make_shared<BackendState>();
+    const arp::MacAddress host{0x02, 0x00, 0x00, 0x00, 0x00, 0x0a};
+    constexpr std::size_t packetCount = 128;
+    std::vector<arp::CapturedPacket> expected;
+    for (std::size_t index = 0; index < packetCount; ++index)
+        expected.push_back(
+            makeCapturedArp(index + 1, 1, {192, 0, 2, 10}, {192, 0, 2, 20}, host, {}));
+    state->packets = expected;
+    auto window = makeWindow(state);
+    window.show();
+    window.setRecordingDestination(path);
+    auto* interfaces = window.findChild<QComboBox*>("interfaceCombo");
+    auto* start = window.findChild<QPushButton*>("startButton");
+    auto* status = window.findChild<QLabel*>("statusLabel");
+    QVERIFY(interfaces && start && status);
+    interfaces->setCurrentIndex(1);
+    start->click();
+    QTRY_COMPARE(window.requestCount(), static_cast<std::uint64_t>(packetCount));
+    QVERIFY(window.isVisible());
+    window.close();
+    QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 10000);
+    QTRY_COMPARE(status->text(), QStringLiteral("Stopped"));
+    QCOMPARE(window.errorCount(), std::uint64_t{0});
+    {
+        std::lock_guard lock(state->mutex);
+        QCOMPARE(state->closes, 1);
+    }
+    auto replay = arp::makeOfflineBackend(path.toStdString());
+    replay->open("offline");
+    for (const auto& packet : expected) {
+        const auto read = replay->read();
+        QCOMPARE(read.status, arp::ReadStatus::Packet);
+        QCOMPARE(read.packet.bytes, packet.bytes);
+        QCOMPARE(read.packet.metadata.captureTimestamp, packet.metadata.captureTimestamp);
+        QCOMPARE(read.packet.metadata.capturedLength, packet.metadata.capturedLength);
+        QCOMPARE(read.packet.metadata.originalLength, packet.metadata.originalLength);
+    }
+    QCOMPARE(replay->read().status, arp::ReadStatus::End);
+    replay->close();
 }
 
 void CaptureGuiTests::countersIgnoreDisplayFiltersAndDetailsFollowSelection()

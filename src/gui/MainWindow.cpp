@@ -95,10 +95,18 @@ void MainWindow::initialize(const std::vector<arp::CaptureInterface>& interfaces
             openRecording(path);
     });
     connect(exportButton_, &QPushButton::clicked, this, [this, scope] {
-        auto path = QFileDialog::getSaveFileName(this, "Export CSV", {}, "CSV files (*.csv)",
-                                                 nullptr, QFileDialog::DontConfirmOverwrite);
-        if (path.isEmpty())
+        QFileDialog dialog(this, "Export CSV");
+        dialog.setObjectName("csvSaveDialog");
+        dialog.setOption(QFileDialog::DontUseNativeDialog);
+        dialog.setOption(QFileDialog::DontConfirmOverwrite);
+        dialog.setAcceptMode(QFileDialog::AcceptSave);
+        dialog.setFileMode(QFileDialog::AnyFile);
+        dialog.setNameFilter("CSV files (*.csv)");
+        dialog.setDefaultSuffix("csv");
+        dialog.selectFile("arp-session.csv");
+        if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
             return;
+        const auto path = dialog.selectedFiles().front();
         bool overwrite = false;
         if (QFileInfo::exists(path)) {
             overwrite = QMessageBox::question(this, "Overwrite CSV?",
