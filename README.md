@@ -8,11 +8,12 @@ Install Apple's Command Line Tools (`xcode-select --install`) and Homebrew, then
 
 ```sh
 brew install cmake ninja qt libpcap pkgconf
+export PKG_CONFIG_PATH="$(brew --prefix libpcap)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 ```
 
 Required: CMake 3.25+, Ninja, a C++20 compiler, Qt 6.5+ Widgets/Test/Concurrent, libpcap development headers/libraries, and pkg-config. Verified on macOS 27.0.1 arm64 with Apple Clang/clang-format 21.0.0, macOS SDK 27.0, CMake 4.4.3, Ninja 1.13.2, Qt 6.11.2, libpcap 1.11.0, and pkgconf 3.0.7. Linux and Windows have not been validated.
 
-Homebrew's normal prefix is discovered automatically. If dependencies are installed elsewhere, use an ignored `CMakeUserPresets.json` preset inheriting `debug`, setting `CMAKE_PREFIX_PATH` to your Qt prefix, and setting `PKG_CONFIG_PATH` in its environment to libpcap's pkgconfig directory. Do not put personal paths in shared presets.
+Homebrew's normal Qt prefix is discovered automatically. libpcap is keg-only on Homebrew, so set the pkg-config path above in the shell used for configuration; CI persists it for all later steps. If dependencies are installed elsewhere, use an ignored `CMakeUserPresets.json` preset inheriting `debug`, setting `CMAKE_PREFIX_PATH` to your Qt prefix, and setting `PKG_CONFIG_PATH` in its environment to libpcap's pkgconfig directory. Do not put personal paths in shared presets.
 
 ## Build, test, and launch
 
